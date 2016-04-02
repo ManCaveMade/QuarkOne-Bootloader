@@ -136,11 +136,13 @@ int main(void)
 		
 		USB_USBTask();
 		
-		/*flicker++;
+		flicker++;
 		if (flicker >= 1000)
 		{
 			flicker = 0;
-		}
+			//QuarkOneSetLEDToggle();
+			
+		}  
 		if (flicker < 100)
 		{
 			QuarkOneSetLEDOn();
@@ -148,10 +150,14 @@ int main(void)
 		else
 		{
 			QuarkOneSetLEDOff();
-		}*/
+		}
+		
 	}
 	
 	//if we get here, reboot to the application
+	GlobalInterruptDisable();
+	
+	
 	
 }
 
@@ -166,7 +172,8 @@ void SetupHardware(void)
 	XMEGACLK_StartInternalOscillator(CLOCK_SRC_INT_RC32MHZ);
 	XMEGACLK_StartDFLL(CLOCK_SRC_INT_RC32MHZ, DFLL_REF_INT_USBSOF, F_USB);
 
-	PMIC.CTRL = PMIC_LOLVLEN_bm | PMIC_MEDLVLEN_bm | PMIC_HILVLEN_bm;
+	CCP = CCP_IOREG_gc;
+	PMIC.CTRL = PMIC_IVSEL_bm | PMIC_LOLVLEN_bm | PMIC_MEDLVLEN_bm | PMIC_HILVLEN_bm;
 
 	QuarkOnePinSetup();
 
