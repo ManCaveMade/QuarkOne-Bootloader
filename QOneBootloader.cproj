@@ -276,7 +276,7 @@
       <Value>../src/LUFA/.</Value>
     </ListValues>
   </avrgcc.compiler.directories.IncludePaths>
-  <avrgcc.compiler.optimization.level>Optimize (-O1)</avrgcc.compiler.optimization.level>
+  <avrgcc.compiler.optimization.level>Optimize for size (-Os)</avrgcc.compiler.optimization.level>
   <avrgcc.compiler.optimization.OtherFlags>-fdata-sections</avrgcc.compiler.optimization.OtherFlags>
   <avrgcc.compiler.optimization.PackStructureMembers>True</avrgcc.compiler.optimization.PackStructureMembers>
   <avrgcc.compiler.optimization.AllocateBytesNeededForEnum>True</avrgcc.compiler.optimization.AllocateBytesNeededForEnum>
@@ -341,6 +341,12 @@
     <None Include="src\LUFA\LUFA\Drivers\Peripheral\Serial.h">
       <SubType>compile</SubType>
     </None>
+    <Compile Include="eeprom_driver.c">
+      <SubType>compile</SubType>
+    </Compile>
+    <Compile Include="eeprom_driver.h">
+      <SubType>compile</SubType>
+    </Compile>
     <Compile Include="QuarkOne.h">
       <SubType>compile</SubType>
     </Compile>

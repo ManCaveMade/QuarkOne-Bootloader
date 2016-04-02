@@ -26,6 +26,7 @@
 
 /* Function Prototypes: */
 void SetupHardware(void);
+void StartApplication(void);
 
 void EVENT_USB_Device_Connect(void);
 void EVENT_USB_Device_Disconnect(void);
@@ -41,7 +42,8 @@ static void USBToUSART_Task(void);
 // Bootloader Stuff: ----------------------------------------------------------
 
 #include "sp_driver.h"
-#include <avr/eeprom.h>
+//#include <avr/eeprom.h>
+#include "eeprom_driver.h"
 
 /* Preprocessor Checks: */
 #if !defined(__OPTIMIZE_SIZE__)
@@ -56,25 +58,51 @@ static void USBToUSART_Task(void);
 /** Version minor of the CDC bootloader. */
 #define BOOTLOADER_VERSION_MINOR     0x00
 
-/** Hardware version major of the CDC bootloader. */
-#define BOOTLOADER_HWVERSION_MAJOR   0x01
-
-/** Hardware version minor of the CDC bootloader. */
-#define BOOTLOADER_HWVERSION_MINOR   0x00
-
 /** Eight character bootloader firmware identifier reported to the host when requested. */
-#define SOFTWARE_IDENTIFIER          "QONECDC"
+#define SOFTWARE_IDENTIFIER          "QOUSBBL"
 
-/** Magic bootloader key to unlock forced application start mode. */
-#define MAGIC_BOOT_KEY               0xDC42
 
 
 #define BOOTLOADER_RX_EP	CDC1_RX_EPADDR
 #define BOOTLOADER_TX_EP	CDC1_TX_EPADDR
 
+// Variables:
+
+/** Circular buffer to hold data from the host before it is sent to the device via the serial port. */
+static RingBuffer_t USBtoUSART_Buffer;
+
+/** Underlying data buffer for \ref USBtoUSART_Buffer, where the stored bytes are located. */
+static uint8_t      USBtoUSART_Buffer_Data[128];
+
+/** Circular buffer to hold data from the serial port before it is sent to the host. */
+static RingBuffer_t USARTtoUSB_Buffer;
+
+/** Underlying data buffer for \ref USARTtoUSB_Buffer, where the stored bytes are located. */
+static uint8_t      USARTtoUSB_Buffer_Data[128];
+
+/** Current address counter. This stores the current address of the FLASH or EEPROM as set by the host,
+*  and is used when reading or writing to the AVRs memory (either FLASH or EEPROM depending on the issued
+*  command.)
+*/
+static uint32_t CurrAddress = 0; //stored as byte address
+
+static uint16_t TempWord;
+
+/** Flag to indicate if the bootloader should be running, or should exit and allow the application code to run
+*  via a watchdog reset. When cleared the bootloader will exit, starting the watchdog and entering an infinite
+*  loop until the AVR restarts and the application runs.
+*/
+static bool RunBootloader = true;
+
+//bootloaderSpice will init to zero, but after a software reboot it will not 
+//reinitialize. If the value is set to BOOTLOADER_SPICE then we should run the BL.
+#define BOOTLOADER_SPICE 0xDECAFBAD
+uint32_t bootloaderSpice __attribute__ ((section (".noinit")));
+
+
 /* Enums: */
 /** Possible memory types that can be addressed via the bootloader. */
-enum AVR109_Memories
+enum AVR911_Memories
 {
 	MEMORY_TYPE_FLASH  = 'F',
 	MEMORY_TYPE_EEPROM = 'E',
@@ -82,50 +110,96 @@ enum AVR109_Memories
 	MEMORY_TYPE_PRODSIG = 'P'
 };
 
-/** Possible commands that can be issued to the bootloader. */
-enum AVR109_Commands
+////////////////////////////////
+/*          COMMANDS          */
+////////////////////////////////
+// 'a'     = Check auto-increment status
+// 'A'     = Set address, two parameters: <high byte>, <low byte>
+// 'e'     = Erase Application Section and EEPROM
+// 'b'     = Check block load support, returns BLOCKSIZE (2 bytes)
+// 'B'     = Start block load, three parameters: block size (<high byte>,<low byte>),memtype
+// 'g'     = Start block read, three parameters: block size (<high byte>,<low byte>),memtype
+// 'R'     = Read program memory, returns high byte then low byte of flash word
+// 'c'     = Write program memory, one parameter: low byte, returns '\r'
+// 'C'     = Write program memory, one parameter: high byte, returns '\r'
+// 'm'     = Write page, returns '?' if page is protected, returns '\r' if done
+// 'D'     = Write EEPROM, one parameter: byte to write
+// 'd'     = Read EEPROM, returns one byte
+// 'l'     = Write lock bits, returns '\r'
+// 'r'     = Read lock bits
+// 'F'     = Read low fuse bits
+// 'N'     = Read high fuse bits
+// 'Q'     = Read extended fuse bits
+// 'P'     = Enter and leave programming mode, returns '\r'
+// 'L'     = Enter and leave programming mode, returns '\r'
+// 'E'     = Exit bootloader, returns '\r', jumps to 0x0000
+// 'p'     = Get programmer type, returns 'S'
+// 't'     = Return supported device codes, returns PARTCODE and 0
+// 'x'     = Turn on LED0, returns '\r'
+// 'y'     = Turn off LED0, returns '\r'
+// 'T'     = Set device type, one parameter: device byte, returns '\r'
+// 'S'     = Returns Xmega_Bootloader
+// 'V'     = Returns version number
+// 's'     = Return signature bytes, returns 3 bytes (sig3, sig2, sig1)
+// 0x1b    = ESC
+// Unknown = '?'
+
+enum AVR911_Commands
 {
-	AVR109_COMMAND_Sync                     = 27,
-	AVR109_COMMAND_ReadEEPROM               = 'd',
-	AVR109_COMMAND_WriteEEPROM              = 'D',
-	AVR109_COMMAND_ReadFLASHWord            = 'R',
-	AVR109_COMMAND_WriteFlashPage           = 'm',
-	AVR109_COMMAND_FillFlashPageWordLow     = 'c',
-	AVR109_COMMAND_FillFlashPageWordHigh    = 'C',
-	AVR109_COMMAND_GetBlockWriteSupport     = 'b',
-	AVR109_COMMAND_BlockWrite               = 'B',
-	AVR109_COMMAND_BlockRead                = 'g',
-	AVR109_COMMAND_ReadExtendedFuses        = 'Q',
-	AVR109_COMMAND_ReadHighFuses            = 'N',
-	AVR109_COMMAND_ReadLowFuses             = 'F',
-	AVR109_COMMAND_ReadLockbits             = 'r',
-	AVR109_COMMAND_WriteLockbits            = 'l',
-	AVR109_COMMAND_EraseFLASH               = 'e',
-	AVR109_COMMAND_ReadSignature            = 's',
-	AVR109_COMMAND_ReadBootloaderSWVersion  = 'V',
-	AVR109_COMMAND_ReadBootloaderHWVersion  = 'v',
-	AVR109_COMMAND_ReadBootloaderIdentifier = 'S',
-	AVR109_COMMAND_ReadBootloaderInterface  = 'p',
-	AVR109_COMMAND_SetCurrentAddress        = 'A',
-	AVR109_COMMAND_SetExtendedCurrentAddress = 'H',
-	AVR109_COMMAND_ReadAutoAddressIncrement = 'a',
-	AVR109_COMMAND_ReadPartCode             = 't',
-	AVR109_COMMAND_EnterProgrammingMode     = 'P',
-	AVR109_COMMAND_LeaveProgrammingMode     = 'L',
-	AVR109_COMMAND_SelectDeviceType         = 'T',
-	AVR109_COMMAND_SetLED                   = 'x',
-	AVR109_COMMAND_ClearLED                 = 'y',
-	AVR109_COMMAND_ExitBootloader           = 'E',
+	COMMAND_Escape                   = 0x1b,
+	COMMAND_ReadEEPROM               = 'd',
+	COMMAND_WriteEEPROM              = 'D',
+	COMMAND_ReadFLASHWord            = 'R',
+	COMMAND_WriteFlashPage           = 'm',
+	COMMAND_FillFlashPageWordLow     = 'c',
+	COMMAND_FillFlashPageWordHigh    = 'C',
+	COMMAND_GetBlockWriteSupport     = 'b',
+	COMMAND_BlockWrite               = 'B',
+	COMMAND_BlockRead                = 'g',
+	COMMAND_ReadExtendedFuses        = 'Q',
+	COMMAND_ReadHighFuses            = 'N',
+	COMMAND_ReadLowFuses             = 'F',
+	COMMAND_ReadLockbits             = 'r',
+	COMMAND_WriteLockbits            = 'l',
+	COMMAND_EraseFLASH               = 'e',
+	COMMAND_ReadSignature            = 's',
+	COMMAND_ReadBootloaderSWVersion  = 'V',
+	COMMAND_ReadBootloaderHWVersion  = 'v',
+	COMMAND_ReadBootloaderIdentifier = 'S',
+	COMMAND_ReadBootloaderInterface  = 'p',
+	COMMAND_SetCurrentAddress        = 'A',
+	COMMAND_ReadAutoAddressIncrement = 'a',
+	COMMAND_ReadPartCode             = 't',
+	COMMAND_EnterProgrammingMode     = 'P',
+	COMMAND_LeaveProgrammingMode     = 'L',
+	COMMAND_SelectDeviceType         = 'T',
+	COMMAND_SetLED                   = 'x',
+	COMMAND_ClearLED                 = 'y',
+	COMMAND_ExitBootloader           = 'E',
+};
+
+enum AVR911_Responses
+{
+	RESPONSE_OKAY              = '\r',
+	RESPONSE_YES               = 'Y',
+//	RESPONSE_NO                = 'N', //Not used
+	RESPONSE_UNKNOWN           = '?'
 };
 
 /* Function Prototypes: */
 static void BootloaderCDC_Task(void);
 
-static void    ReadWriteMemoryBlock(const uint8_t Command);
+//static void    ReadWriteMemoryBlock(const uint8_t Command);
+
+static uint8_t BlockLoad(uint16_t size, uint8_t mem, uint32_t *address);
+static void BlockRead(uint16_t size, uint8_t mem, uint32_t *address);
 
 static uint8_t FetchNextCommandByte(void);
 static void    WriteNextResponseByte(const uint8_t Response);
 
+
+static void ResetIntoBootloader(void); 
+static void DoBootloader(void);
 
 #endif
 
