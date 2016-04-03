@@ -81,7 +81,36 @@ USB_ClassInfo_CDC_Device_t ESP_CDC_Interface =
 
 //};
 
+static inline void GetBootloaderSpice(void)
+{
+	EEPROM_EnableMapping();
+	EEPROM_WaitForNVM();
+	bootloaderSpice = EEPROM(BOOTLOADER_SPICE_EEPROM_PAGE, BOOTLOADER_SPICE_EEPROM_BYTE);
+}
 
+static inline void SetBootloaderSpice(void)
+{
+	if (bootloaderSpice == BOOTLOADER_SPICE)
+	return;
+	
+	EEPROM_EnableMapping();
+	EEPROM_WaitForNVM();
+	EEPROM(BOOTLOADER_SPICE_EEPROM_PAGE, BOOTLOADER_SPICE_EEPROM_BYTE) = BOOTLOADER_SPICE;
+	EEPROM_AtomicWritePage(BOOTLOADER_SPICE_EEPROM_PAGE);
+	bootloaderSpice = BOOTLOADER_SPICE;
+}
+
+static inline void ClearBootloaderSpice(void)
+{
+	if (bootloaderSpice != BOOTLOADER_SPICE)
+	return;
+	
+	EEPROM_EnableMapping();
+	EEPROM_WaitForNVM();
+	EEPROM(BOOTLOADER_SPICE_EEPROM_PAGE, BOOTLOADER_SPICE_EEPROM_BYTE) = 0;
+	EEPROM_AtomicWritePage(BOOTLOADER_SPICE_EEPROM_PAGE);
+	bootloaderSpice = 0;
+}
 
 
 int main(void)
@@ -94,46 +123,91 @@ int main(void)
 	XMEGACLK_StartInternalOscillator(CLOCK_SRC_INT_RC32MHZ);
 	XMEGACLK_StartDFLL(CLOCK_SRC_INT_RC32MHZ, DFLL_REF_INT_USBSOF, F_USB);
 	
-	//Make a decision about whether to go into the bootloader or not
+	CCP = CCP_IOREG_gc;
+	PMIC.CTRL = PMIC_IVSEL_bm | PMIC_LOLVLEN_bm | PMIC_MEDLVLEN_bm | PMIC_HILVLEN_bm;
 	
-	//Go into the bootloader if there was a software reset and the spice is there
+	QuarkOnePinSetup();
+	
+	GetBootloaderSpice();
+	
+
+	//Make a decision about whether to go into the bootloader or not:
+	
+	//Must go into bootloader if:
+	//^^^^^^^^^^^^^^^^^^^^^^^^^^^
+	//Go into the bootloader if there was a reset and the spice is there
 	//Go into bootloader if flash is unprogrammed
-	//Otherwise continue to the application
 	
-	//SP_WaitForSPM();
-	if ((pgm_read_word(0) == 0xFFFF)
-	|| ((RST.STATUS & RST_SRF_bm) && (bootloaderSpice == BOOTLOADER_SPICE))
-	|| (RST.STATUS & RST_EXTRF_bm)
-	|| true)
+	//Otherwise:
+	//^^^^^^^^^^
+	//Start the timer (Same as LilyPad Caterina: 750ms) after which we launch the app
+	//If there is a second external reset within this time, launch to bootloader
+	
+	//QuarkOneSetLEDOn();
+	
+	TCC0.PER = 1563; //~50ms
+	TCC0.INTCTRLA = ( TCC0.INTCTRLA & ~TC0_OVFINTLVL_gm ) | TC_OVFINTLVL_LO_gc;
+	TCC0.CTRLA = ( TCC0.CTRLA & ~TC0_CLKSEL_gm ) | TC_CLKSEL_DIV1024_gc; //31250 Hz
+	
+	//LaunchBootloader();
+	
+	bool appPresent = (pgm_read_word(0) == 0xFFFF);
+	appPresent = true;
+	
+	if (appPresent)
 	{
-		DoBootloader();
+		if (RST.STATUS & RST_PORF_bm) //launch app immediately on power-on-reset
+		{
+			RST.STATUS |= RST_PORF_bm;
+			LaunchApplication();
+		}
+		else if (bootloaderSpice == BOOTLOADER_SPICE) //if the spice is there, launch bootloader (regardless of the reset source).
+		{
+			ClearBootloaderSpice();
+			LaunchBootloader();
+		}
+		else if (RST.STATUS & RST_EXTRF_bm) //external reset
+		{
+			QuarkOneSetLEDOn();
+			RST.STATUS |= RST_EXTRF_bm;
+			
+			//Wait for 750ms in case there is another external reset, otherwise continue to the application
+			GlobalInterruptEnable(); //so that we can use the timer interrupt to track time
+			
+			SetBootloaderSpice();
+			RunBootloader = true;
+			
+			while (RunBootloader) //this will be interrupted by another reset
+			{
+				if (resetTimeout > EXT_RESET_TIMEOUT_VALUE)
+				{
+					RunBootloader = false;
+				}
+			}
+			
+			//If we get to this point then there was no second reset
+		}
 	}
-	//RST.STATUS = RST_SRF_bm | RST_PDIRF_bm | RST_WDRF_bm | RST_BORF_bm | RST_EXTRF_bm | RST_PORF_bm; //clear the flags
-		
-	//Bootloader is finished, so reboot to the app
-	RST.STATUS = RST_SRF_bm;
-	bootloaderSpice = 0;
-	EIND = 0x00;
-	void (*reset_vect)( void ) = 0x000000;
-	reset_vect();
+	else
+	{
+		LaunchBootloader();
+	}
+	
+	//Bootloader is finished, so reboot to the app, if there isnt one then a reset will be needed lol
+	LaunchApplication();
 }
 
 /** Configures the board hardware and chip peripherals for the demo's functionality. */
 void SetupHardware(void)
 {
-	CCP = CCP_IOREG_gc;
-	PMIC.CTRL = PMIC_IVSEL_bm | PMIC_LOLVLEN_bm | PMIC_MEDLVLEN_bm | PMIC_HILVLEN_bm;
-
-	QuarkOnePinSetup();
-	
 	/* Further Hardware Initialization which is only done if we are going into the bootloader */
 	Serial_Init(&QuarkOne_ESP_USART, 115200, false, true); //MC: modified for interrupts
 
-	for (uint8_t i = 0; i < 5; ++i)
+	/*for (uint8_t i = 0; i < 5; ++i)
 	{
 		Delay_MS(100);
 		QuarkOneSetLEDToggle();
-	}
+	}*/
 	QuarkOneSetLEDOff();
 
 	//MC: The DTR signals mess with the mode at connect for some reason.
@@ -144,8 +218,34 @@ void SetupHardware(void)
 	USB_Init();
 }
 
-static void DoBootloader(void)
+ISR(TCC0_OVF_vect)
 {
+	resetTimeout++;
+	
+	//Sexy LED flashing
+	if (LEDFlicker)
+	{
+		LEDPulseCount++;
+		if ((LEDPulseCount == 1) || (LEDPulseCount == 4))
+		{
+			QuarkOneSetLEDOn();
+		}
+		else
+		{
+			QuarkOneSetLEDOff();
+		}
+		if (LEDPulseCount >= 20) //1s
+		LEDPulseCount = 0;
+	}
+}
+
+
+static void LaunchBootloader(void)
+{
+	GlobalInterruptDisable();
+	
+	RunBootloader = true;
+	
 	RingBuffer_InitBuffer(&USBtoUSART_Buffer, USBtoUSART_Buffer_Data, sizeof(USBtoUSART_Buffer_Data));
 	RingBuffer_InitBuffer(&USARTtoUSB_Buffer, USARTtoUSB_Buffer_Data, sizeof(USARTtoUSB_Buffer_Data));
 	
@@ -153,7 +253,7 @@ static void DoBootloader(void)
 
 	GlobalInterruptEnable();
 
-	uint16_t flicker = 0;
+	LEDFlicker = true;
 
 	while (RunBootloader)
 	{
@@ -164,32 +264,31 @@ static void DoBootloader(void)
 		CDC_Device_USBTask(&ESP_CDC_Interface);
 		
 		USB_USBTask();
-		
-		flicker++;
-		if (flicker >= 1000)
-		{
-			flicker = 0;
-		}
-		if (flicker < 50)
-		{
-			QuarkOneSetLEDOn();
-		}
-		else
-		{
-			QuarkOneSetLEDOff();
-		}
 	}
+	
+	SP_WaitForSPM();
+	SP_LockSPM();
+	
+	LaunchApplication();
 }
 
-static void ResetIntoBootloader(void)
+static void LaunchApplication(void)
 {
 	GlobalInterruptDisable();
-	PMIC.CTRL = 0;
-	bootloaderSpice = BOOTLOADER_SPICE;
+	ClearBootloaderSpice();
+	
+	//Undo everything so that the new app has a fresh start
+	//We could also do a WDT reset or a soft reset (MC: Can't manage it right now :P )
 	CCP = CCP_IOREG_gc;
-	RST.CTRL = RST_SWRST_bm;
-	while(1); //wait while the chip reboots
+	PMIC.CTRL = 0;
+	TCC0.INTCTRLA = 0;
+	TCC0.CTRLA = 0;
+	Serial_Disable(&QuarkOne_ESP_USART);
+	USB_Disable();
+	
+	asm("jmp 0x0000");
 }
+
 
 /** Event handler for the library USB Connection event. */
 void EVENT_USB_Device_Connect(void)
@@ -298,7 +397,7 @@ ISR(QuarkOne_ESP_USART_TX_DRE_vect)
 static void USBToUSART_Task(void)
 {
 	//USB to USART
-	//Do as many bytes as possible (probably less than 16 at a time so errors shouldn't happen)
+	//Do as many bytes as possible
 	uint16_t bytesReceived = CDC_Device_BytesReceived(&ESP_CDC_Interface);
 	
 	while ((bytesReceived--) && !(RingBuffer_IsFull(&USBtoUSART_Buffer)))
@@ -306,37 +405,31 @@ static void USBToUSART_Task(void)
 		RingBuffer_Insert(&USBtoUSART_Buffer, CDC_Device_ReceiveByte(&ESP_CDC_Interface));
 	}
 
-	/*if (RingBuffer_IsFull(&USBtoUSART_Buffer))
-	{
-	CDC_Device_SendString(&ESP_CDC_Interface, "Buffer overrun in USB to USART!\n");
-	//QuarkOneSetLEDOn(); //error
-	}*/
-
-
 	//USART to USB
 	uint16_t BufferCount = RingBuffer_GetCount(&USARTtoUSB_Buffer);
+	
 	if (BufferCount)
 	{
-		//Endpoint_SelectEndpoint(ESP_CDC_Interface.Config.DataINEndpoint.Address);
+		Endpoint_SelectEndpoint(ESP_CDC_Interface.Config.DataINEndpoint.Address);
 
 		//CDC_Device_SendString(&ESP_CDC_Interface, "Sending!\n");
 
 		/* Check if a packet is already enqueued to the host - if so, we shouldn't try to send more data
 		* until it completes as there is a chance nothing is listening and a lengthy timeout could occur */
-		//if (Endpoint_IsINReady())
-		//{
-		/* Never send more than one bank size less one byte to the host at a time, so that we don't block
-		* while a Zero Length Packet (ZLP) to terminate the transfer is sent if the host isn't listening */
-		uint8_t BytesToSend = MIN(BufferCount, (CDC_TXRX_EPSIZE - 1));
-
-		/* Read bytes from the USART receive buffer into the USB IN endpoint */
-		while (BytesToSend--)
+		if (Endpoint_IsINReady())
 		{
-			// Try to send the next byte of data to the host, abort if there is an error, without dequeuing
-			CDC_Device_SendByte(&ESP_CDC_Interface,	RingBuffer_Remove(&USARTtoUSB_Buffer));
+			/* Never send more than one bank size less one byte to the host at a time, so that we don't block
+			* while a Zero Length Packet (ZLP) to terminate the transfer is sent if the host isn't listening */
+			uint8_t BytesToSend = MIN(BufferCount, (CDC_TXRX_EPSIZE - 1));
+
+			/* Read bytes from the USART receive buffer into the USB IN endpoint */
+			while (BytesToSend--)
+			{
+				// Try to send the next byte of data to the host, abort if there is an error, without dequeuing
+				CDC_Device_SendByte(&ESP_CDC_Interface,	RingBuffer_Remove(&USARTtoUSB_Buffer));
+			}
+			//
 		}
-		//
-		//}
 	}
 	
 	

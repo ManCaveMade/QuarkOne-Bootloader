@@ -93,11 +93,19 @@ static uint16_t TempWord;
 *  loop until the AVR restarts and the application runs.
 */
 static bool RunBootloader = true;
+static bool LEDFlicker = false;
 
 //bootloaderSpice will init to zero, but after a software reboot it will not 
 //reinitialize. If the value is set to BOOTLOADER_SPICE then we should run the BL.
-#define BOOTLOADER_SPICE 0xDECAFBAD
-uint32_t bootloaderSpice __attribute__ ((section (".noinit")));
+#define BOOTLOADER_SPICE 0x66
+#define BOOTLOADER_SPICE_EEPROM_PAGE 0x00
+#define BOOTLOADER_SPICE_EEPROM_BYTE 0x00
+static uint8_t bootloaderSpice = 0; //This should only be modified by the Get, Set and Clear functions, below.
+
+#define EXT_RESET_TIMEOUT_VALUE 15 //Timer ticks every 50ms. 15*50 = 750ms
+volatile uint16_t resetTimeout = 0;
+
+static uint8_t LEDPulseCount = 0;
 
 
 /* Enums: */
@@ -197,9 +205,13 @@ static void BlockRead(uint16_t size, uint8_t mem, uint32_t *address);
 static uint8_t FetchNextCommandByte(void);
 static void    WriteNextResponseByte(const uint8_t Response);
 
+static inline void GetBootloaderSpice(void) ATTR_ALWAYS_INLINE;
+static inline void SetBootloaderSpice(void) ATTR_ALWAYS_INLINE;
+static inline void ClearBootloaderSpice(void) ATTR_ALWAYS_INLINE;
 
 static void ResetIntoBootloader(void); 
-static void DoBootloader(void);
+static void LaunchBootloader(void);
+static void LaunchApplication(void);
 
 #endif
 
