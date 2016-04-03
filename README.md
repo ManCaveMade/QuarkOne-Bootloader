@@ -1,5 +1,5 @@
 # QuarkOne - Bootloader
-## By: ManCave Made (Mitchell A. Cox)
+*By: ManCave Made (Mitchell A. Cox)*
 
 A bootloader for the Atmel XMEGA 128A4U based on LUFA and xboot, with a serial pass-through mode for programming the ESP8266.
 
