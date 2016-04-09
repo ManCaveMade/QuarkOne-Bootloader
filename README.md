@@ -11,6 +11,9 @@ The second serial port is a transparent passthrough to the Quark One ESP8266 (ES
 
 The ESP passthrough has been tested with the Arduino IDE in 'Generic ESP8266 Module' mode.
 
+### USB Drivers
+You may find that the USB device on Windows is unrecognised. On Windows, download the QuarkOneBootloader.inf fine from this repository and in the file browser, right click it and "Install" the driver. This will enable Windows to recognise the USB IDs as CDC devices.
+
 ## License
 
 MIT License. Copyright (c) Mitchell A. Cox (mitch[at]enox[.]co[.]za)
