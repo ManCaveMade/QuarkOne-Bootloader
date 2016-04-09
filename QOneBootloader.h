@@ -53,10 +53,10 @@ static void USBToUSART_Task(void);
 
 /* Macros: */
 /** Version major of the CDC bootloader. */
-#define BOOTLOADER_VERSION_MAJOR     0x01
+#define BOOTLOADER_VERSION_MAJOR     '1'
 
 /** Version minor of the CDC bootloader. */
-#define BOOTLOADER_VERSION_MINOR     0x00
+#define BOOTLOADER_VERSION_MINOR     '0'
 
 /** Eight character bootloader firmware identifier reported to the host when requested. */
 #define SOFTWARE_IDENTIFIER          "QOUSBBL"
@@ -87,6 +87,7 @@ static uint8_t      USARTtoUSB_Buffer_Data[128];
 static uint32_t CurrAddress = 0; //stored as byte address
 
 static uint16_t TempWord;
+static bool ChipErased = false;
 
 /** Flag to indicate if the bootloader should be running, or should exit and allow the application code to run
 *  via a watchdog reset. When cleared the bootloader will exit, starting the watchdog and entering an infinite

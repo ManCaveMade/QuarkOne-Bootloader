@@ -205,8 +205,8 @@ void SetupHardware(void)
 
 	/*for (uint8_t i = 0; i < 5; ++i)
 	{
-		Delay_MS(100);
-		QuarkOneSetLEDToggle();
+	Delay_MS(100);
+	QuarkOneSetLEDToggle();
 	}*/
 	QuarkOneSetLEDOff();
 
@@ -267,7 +267,7 @@ static void LaunchBootloader(void)
 	}
 	
 	SP_WaitForSPM();
-	SP_LockSPM();
+	//SP_LockSPM();
 	
 	LaunchApplication();
 }
@@ -440,7 +440,7 @@ static void USBToUSART_Task(void)
 * --------------- Bootloader --------------------------------------------------
 */
 
-static uint8_t BlockLoad(unsigned int size, uint8_t mem, uint32_t *address) {
+static uint8_t BlockLoad(uint16_t size, uint8_t mem, uint32_t *address) {
 	uint16_t data;
 	uint32_t tempaddress;
 
@@ -471,11 +471,13 @@ static uint8_t BlockLoad(unsigned int size, uint8_t mem, uint32_t *address) {
 		}
 		return RESPONSE_OKAY;
 	}
-	else if (mem == MEMORY_TYPE_FLASH)
+	else if ((mem == MEMORY_TYPE_FLASH) || (mem == MEMORY_TYPE_USERSIG))
 	{
 		// NOTE: For flash programming, 'address' is given in words.
 		(*address) <<= 1;
 		tempaddress = (*address);
+
+		SP_WaitForSPM();
 
 		do
 		{
@@ -483,15 +485,36 @@ static uint8_t BlockLoad(unsigned int size, uint8_t mem, uint32_t *address) {
 			data |= (FetchNextCommandByte() << 8);
 
 			SP_LoadFlashWord(*address, data);
+			SP_WaitForSPM();
 
 			(*address)+=2;
 			size -= 2;
 		}
 		while(size);
 
-		SP_WriteApplicationPage(tempaddress);
 
+		if (mem == MEMORY_TYPE_FLASH)
+		{
+			if (ChipErased == true)
+			{
+				SP_WriteApplicationPage(tempaddress); //avrdude doesnt always erase chip first
+			}
+			else
+			{
+				SP_EraseWriteApplicationPage(tempaddress);
+			}
+		} 
+		else if (mem == MEMORY_TYPE_USERSIG)
+		{
+			//MC: Not tested.
+			SP_EraseUserSignatureRow();
+			SP_WaitForSPM();
+			SP_WriteUserSignatureRow();
+			SP_WaitForSPM();
+		}
+		
 		SP_WaitForSPM();
+		
 		(*address) >>= 1;
 		return RESPONSE_OKAY;
 	}
@@ -521,17 +544,39 @@ static void BlockRead(uint16_t size, uint8_t mem, uint32_t *address) {
 		}
 		while (size);                                       // Repeat until all block has been read
 	}
-	else if(mem == MEMORY_TYPE_FLASH)
+	else if ((mem == MEMORY_TYPE_FLASH) || (mem == MEMORY_TYPE_USERSIG) || (mem == MEMORY_TYPE_PRODSIG))
 	{
 		(*address) <<= 1;
-
+		
 		do
 		{
-			WriteNextResponseByte( SP_ReadByte( *address) );
-			WriteNextResponseByte( SP_ReadByte( (*address)+1) );
+			if (mem == MEMORY_TYPE_FLASH)
+			{
+				TempWord = SP_ReadByte(*address);
+			}
+			else if (mem == MEMORY_TYPE_USERSIG)
+			{
+				TempWord = SP_ReadUserSignatureByte(*address);
+			}
+			else if (mem == MEMORY_TYPE_PRODSIG)
+			{
+				TempWord = SP_ReadCalibrationByte(*address);
+			}
+				
+			//SP_WaitForSPM();
+			WriteNextResponseByte(TempWord & 0xFF);
+			//WriteNextResponseByte((TempWord >> 8) & 0xFF);
+			//WriteNextResponseByte( SP_ReadByte( *address) );
+			//WriteNextResponseByte( SP_ReadByte( (*address)+1) );
 
-			(*address) += 2;
-			size -= 2;
+			//(*address) += 2;
+			//size -= 2;
+			(*address)++;
+			size--;
+			
+			//Stop when we get to the bootloader section
+			if (*address >= (BOOT_SECTION_START >> 1))
+			size = 0;
 		}
 		while (size);
 
@@ -544,16 +589,19 @@ static uint8_t FetchNextCommandByte(void)
 {
 	int16_t ReceivedByte = CDC_Device_ReceiveByte(&CDC_Interface);
 	
+	return ReceivedByte < 0 ? 0 : (uint8_t)ReceivedByte;
+	
+	/*
 	if (ReceivedByte != -1)
 	{
-		return (uint8_t)ReceivedByte;
+	return (uint8_t)ReceivedByte;
 	}
 	
-	return 0;
+	return 0; */
 }
 
 
-static void WriteNextResponseByte(const uint8_t Response)
+static inline void WriteNextResponseByte(const uint8_t Response)
 {
 	CDC_Device_SendByte(&CDC_Interface, Response);
 }
@@ -630,19 +678,22 @@ static void BootloaderCDC_Task(void)
 		WriteNextResponseByte(SIGNATURE_1);
 		WriteNextResponseByte(SIGNATURE_0);
 	}
-	else if (Command == COMMAND_EraseFLASH)
+	else if (Command == COMMAND_EraseFLASH) //Note: This command is not necessarily called by avrdude unless -e is used.
 	{
-		//MC TODO: This should work instead of a loop...
-		//SP_EraseApplicationSection();
-		//SP_WaitForSPM();
+		SP_WaitForSPM();
+		SP_EraseApplicationSection();
+		SP_WaitForSPM();
 		
-		for(CurrAddress = 0; CurrAddress < APP_SECTION_END; CurrAddress += SPM_PAGESIZE) {
-			SP_WaitForSPM();
-			SP_EraseApplicationPage( CurrAddress ); // Byte address, not word address
-		}
+		/*for(CurrAddress = 0; CurrAddress < APP_SECTION_END; CurrAddress += SPM_PAGESIZE) {
+		SP_WaitForSPM();
+		SP_EraseApplicationPage( CurrAddress ); // Byte address, not word address
+		SP_WaitForSPM();
+		}*/
 
-		//EEPROM_LoadPage(&val);                        // Write random values to the page buffer
-		//EEPROM_EraseAll();
+		EEPROM_LoadPage(&Command);                        // Write random values to the page buffer
+		EEPROM_EraseAll();
+
+		ChipErased = true;
 
 		WriteNextResponseByte(RESPONSE_OKAY);
 	}
@@ -691,48 +742,47 @@ static void BootloaderCDC_Task(void)
 	else if (Command == COMMAND_BlockRead)
 	{
 		TempWord = (FetchNextCommandByte() << 8) | FetchNextCommandByte();
-		uint8_t val = FetchNextCommandByte();
+		uint8_t val = FetchNextCommandByte(); //memory type
 		/* Delegate the block write/read to a separate function for clarity */
 		//ReadWriteMemoryBlock(Command);
 		BlockRead(TempWord, val, &CurrAddress);
 	}
-	else if (Command == COMMAND_FillFlashPageWordHigh)
+	/*else if (Command == COMMAND_FillFlashPageWordHigh)	//Flash Byte Support (Optional)
 	{
 		TempWord |= FetchNextCommandByte() << 8;
 		
 		SP_WaitForSPM();
 		SP_LoadFlashWord((CurrAddress << 1), TempWord);
 		CurrAddress++;
-		
+
 		WriteNextResponseByte(RESPONSE_OKAY);
 	}
-	else if (Command == COMMAND_FillFlashPageWordLow)
+	else if (Command == COMMAND_FillFlashPageWordLow) //Flash Byte Support (Optional)
 	{
 		TempWord = FetchNextCommandByte();
 		WriteNextResponseByte(RESPONSE_OKAY);
 	}
-	else if (Command == COMMAND_WriteFlashPage)
+	else if (Command == COMMAND_WriteFlashPage) //Flash Byte Support (Optional)
 	{
-		if (CurrAddress >= (FLASHEND >> 1))
+		if (CurrAddress >= (APP_SECTION_END >> 1))
 		{
 			WriteNextResponseByte(RESPONSE_UNKNOWN);
 		}
 		else
 		{
-			QuarkOneSetLEDOn();
 			SP_WaitForSPM();
 			SP_WriteApplicationPage(CurrAddress << 1);
 			WriteNextResponseByte(RESPONSE_OKAY);
-			QuarkOneSetLEDOff();
 		}
 	}
-	else if (Command == COMMAND_ReadFLASHWord)
+	else if (Command == COMMAND_ReadFLASHWord) //Flash Byte Support (Optional)
 	{
 		SP_WaitForSPM();
 		WriteNextResponseByte(SP_ReadByte( (CurrAddress << 1) + 1));
+		SP_WaitForSPM();
 		WriteNextResponseByte(SP_ReadByte( (CurrAddress << 1) + 0));
 		CurrAddress++;
-	}
+	}*/
 	else if (Command == COMMAND_WriteEEPROM)
 	{
 		EEPROM_WriteByte( (uint8_t)(CurrAddress / EEPROM_PAGE_SIZE), (uint8_t)(CurrAddress & (EEPROM_PAGE_SIZE - 1)), FetchNextCommandByte() );
