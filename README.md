@@ -1,7 +1,7 @@
 # QuarkOne - Bootloader
 *By: ManCave Made (Mitchell A. Cox)*
 
-A bootloader for the Atmel XMEGA 128A4U based on LUFA and xboot, with a serial pass-through mode for programming the ESP8266.
+A bootloader for the Atmel XMEGA 128A4U based on LUFA (https://github.com/abcminiuser/lufa) and the AVR911 protocol, with a serial pass-through mode for programming the ESP8266.
 
 ### Activating the Bootloader
 
@@ -23,7 +23,7 @@ See the official ESP8266 Arduino Project for details and instructions: https://g
 
 ##### Performance
 
-The burn performance of esptool seems to be quite low (I'm not sure if this is normal). However, I have tested the Quark One up to 921600 baud and the speed is certainly better than at 115200. You can set this in the Arduino IDE. I suspect that there is a timeout happening in the LUFA USB CDC framework which is impairing performance but for not at least it works!
+The burn performance of esptool seems to be quite low (I'm not sure if this is normal). However, I have tested the Quark One up to 921600 baud and the speed is certainly better than at 115200. You can set this in the Arduino IDE. I suspect that there is a timeout happening in the LUFA USB CDC framework which is impairing performance but for now at least it works!
 
 #### Xmegaduino
 
