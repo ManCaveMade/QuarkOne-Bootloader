@@ -388,48 +388,56 @@ ISR(QuarkOne_ESP_USART_TX_DRE_vect)
 	/* Load the next few bytes from the USART transmit buffer into the USART if transmit buffer space is available */
 	while ((Serial_IsSendReady(&QuarkOne_ESP_USART) && !(RingBuffer_IsEmpty(&USBtoUSART_Buffer))))
 	{
-		QuarkOneSetLEDOn();
+		//QuarkOneSetLEDOn();
 		Serial_SendByte(&QuarkOne_ESP_USART, RingBuffer_Remove(&USBtoUSART_Buffer));
-		QuarkOneSetLEDOff();
+		//QuarkOneSetLEDOff();
 	}
 }
 
 static void USBToUSART_Task(void)
 {
 	//USB to USART
+		
+	//Endpoint_SelectEndpoint(ESP_CDC_Interface.Config.DataINEndpoint.Address);
+	
 	//Do as many bytes as possible
 	uint16_t bytesReceived = CDC_Device_BytesReceived(&ESP_CDC_Interface);
 	
 	while ((bytesReceived--) && !(RingBuffer_IsFull(&USBtoUSART_Buffer)))
 	{
-		RingBuffer_Insert(&USBtoUSART_Buffer, CDC_Device_ReceiveByte(&ESP_CDC_Interface));
+		RingBuffer_Insert(&USBtoUSART_Buffer, Endpoint_Read_8());
 	}
 
 	//USART to USB
 	uint16_t BufferCount = RingBuffer_GetCount(&USARTtoUSB_Buffer);
+	//uint8_t error = false;
 	
 	if (BufferCount)
 	{
-		Endpoint_SelectEndpoint(ESP_CDC_Interface.Config.DataINEndpoint.Address);
-
 		//CDC_Device_SendString(&ESP_CDC_Interface, "Sending!\n");
 
 		/* Check if a packet is already enqueued to the host - if so, we shouldn't try to send more data
 		* until it completes as there is a chance nothing is listening and a lengthy timeout could occur */
-		if (Endpoint_IsINReady())
-		{
-			/* Never send more than one bank size less one byte to the host at a time, so that we don't block
-			* while a Zero Length Packet (ZLP) to terminate the transfer is sent if the host isn't listening */
-			uint8_t BytesToSend = MIN(BufferCount, (CDC_TXRX_EPSIZE - 1));
+		//if (Endpoint_IsINReady())
+		//{
+		/* Never send more than one bank size less one byte to the host at a time, so that we don't block
+		* while a Zero Length Packet (ZLP) to terminate the transfer is sent if the host isn't listening */
+		uint8_t BytesToSend = MIN(BufferCount, (CDC_TXRX_EPSIZE - 1));
 
-			/* Read bytes from the USART receive buffer into the USB IN endpoint */
-			while (BytesToSend--)
+		/* Read bytes from the USART receive buffer into the USB IN endpoint */
+		while (BytesToSend--)
+		{
+			// Try to send the next byte of data to the host, abort if there is an error, without dequeuing
+			if (CDC_Device_SendByte(&ESP_CDC_Interface,	RingBuffer_Peek(&USARTtoUSB_Buffer)) != ENDPOINT_READYWAIT_NoError)
 			{
-				// Try to send the next byte of data to the host, abort if there is an error, without dequeuing
-				CDC_Device_SendByte(&ESP_CDC_Interface,	RingBuffer_Remove(&USARTtoUSB_Buffer));
+				break;
 			}
-			//
+			
+			RingBuffer_Remove(&USARTtoUSB_Buffer);
 		}
+		
+		//CDC_Device_Flush(&ESP_CDC_Interface);
+		//}
 	}
 	
 	
@@ -503,7 +511,7 @@ static uint8_t BlockLoad(uint16_t size, uint8_t mem, uint32_t *address) {
 			{
 				SP_EraseWriteApplicationPage(tempaddress);
 			}
-		} 
+		}
 		else if (mem == MEMORY_TYPE_USERSIG)
 		{
 			//MC: Not tested.
@@ -562,7 +570,7 @@ static void BlockRead(uint16_t size, uint8_t mem, uint32_t *address) {
 			{
 				TempWord = SP_ReadCalibrationByte(*address);
 			}
-				
+			
 			//SP_WaitForSPM();
 			WriteNextResponseByte(TempWord & 0xFF);
 			//WriteNextResponseByte((TempWord >> 8) & 0xFF);
@@ -749,39 +757,39 @@ static void BootloaderCDC_Task(void)
 	}
 	/*else if (Command == COMMAND_FillFlashPageWordHigh)	//Flash Byte Support (Optional)
 	{
-		TempWord |= FetchNextCommandByte() << 8;
-		
-		SP_WaitForSPM();
-		SP_LoadFlashWord((CurrAddress << 1), TempWord);
-		CurrAddress++;
+	TempWord |= FetchNextCommandByte() << 8;
+	
+	SP_WaitForSPM();
+	SP_LoadFlashWord((CurrAddress << 1), TempWord);
+	CurrAddress++;
 
-		WriteNextResponseByte(RESPONSE_OKAY);
+	WriteNextResponseByte(RESPONSE_OKAY);
 	}
 	else if (Command == COMMAND_FillFlashPageWordLow) //Flash Byte Support (Optional)
 	{
-		TempWord = FetchNextCommandByte();
-		WriteNextResponseByte(RESPONSE_OKAY);
+	TempWord = FetchNextCommandByte();
+	WriteNextResponseByte(RESPONSE_OKAY);
 	}
 	else if (Command == COMMAND_WriteFlashPage) //Flash Byte Support (Optional)
 	{
-		if (CurrAddress >= (APP_SECTION_END >> 1))
-		{
-			WriteNextResponseByte(RESPONSE_UNKNOWN);
-		}
-		else
-		{
-			SP_WaitForSPM();
-			SP_WriteApplicationPage(CurrAddress << 1);
-			WriteNextResponseByte(RESPONSE_OKAY);
-		}
+	if (CurrAddress >= (APP_SECTION_END >> 1))
+	{
+	WriteNextResponseByte(RESPONSE_UNKNOWN);
+	}
+	else
+	{
+	SP_WaitForSPM();
+	SP_WriteApplicationPage(CurrAddress << 1);
+	WriteNextResponseByte(RESPONSE_OKAY);
+	}
 	}
 	else if (Command == COMMAND_ReadFLASHWord) //Flash Byte Support (Optional)
 	{
-		SP_WaitForSPM();
-		WriteNextResponseByte(SP_ReadByte( (CurrAddress << 1) + 1));
-		SP_WaitForSPM();
-		WriteNextResponseByte(SP_ReadByte( (CurrAddress << 1) + 0));
-		CurrAddress++;
+	SP_WaitForSPM();
+	WriteNextResponseByte(SP_ReadByte( (CurrAddress << 1) + 1));
+	SP_WaitForSPM();
+	WriteNextResponseByte(SP_ReadByte( (CurrAddress << 1) + 0));
+	CurrAddress++;
 	}*/
 	else if (Command == COMMAND_WriteEEPROM)
 	{
