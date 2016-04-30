@@ -21,6 +21,10 @@ The ESP passthrough has been tested with the Arduino IDE in 'Generic ESP8266 Mod
 
 See the official ESP8266 Arduino Project for details and instructions: https://github.com/esp8266/Arduino
 
+##### Performance
+
+The burn performance of esptool seems to be quite low (I'm not sure if this is normal). However, I have tested the Quark One up to 921600 baud and the speed is certainly better than at 115200. You can set this in the Arduino IDE. I suspect that there is a timeout happening in the LUFA USB CDC framework which is impairing performance but for not at least it works!
+
 #### Xmegaduino
 
 The XMEGA microcontroller on the Quark One should be compatible with the Xmegaduino project. Work is in progress to update and create the relevant board files to facilitate this process. 
