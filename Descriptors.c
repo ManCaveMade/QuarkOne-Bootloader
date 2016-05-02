@@ -53,9 +53,9 @@ const USB_Descriptor_Device_t DeviceDescriptor =
 	.Protocol               = USB_CSCP_IADDeviceProtocol,
 
 	.Endpoint0Size          = FIXED_CONTROL_ENDPOINT_SIZE,
-
-	.VendorID               = 0x1d50,
-	.ProductID              = 0x60eb,
+	// VID/PID from http://pid.codes/
+	.VendorID               = 0x1209,
+	.ProductID              = 0xded1,
 	.ReleaseNumber          = VERSION_BCD(0,0,1),
 
 	.ManufacturerStrIndex   = STRING_ID_Manufacturer,
@@ -114,7 +114,7 @@ const USB_Descriptor_Configuration_t ConfigurationDescriptor =
 			.SubClass               = CDC_CSCP_ACMSubclass,
 			.Protocol               = CDC_CSCP_ATCommandProtocol,
 
-			.InterfaceStrIndex      = STRING_ID_AVR//NO_DESCRIPTOR
+			.InterfaceStrIndex      = STRING_ID_ESP//NO_DESCRIPTOR
 		},
 
 	.CDC1_Functional_Header =
@@ -215,7 +215,7 @@ const USB_Descriptor_Configuration_t ConfigurationDescriptor =
 			.SubClass               = CDC_CSCP_ACMSubclass,
 			.Protocol               = CDC_CSCP_ATCommandProtocol,
 
-			.InterfaceStrIndex      = STRING_ID_ESP//NO_DESCRIPTOR
+			.InterfaceStrIndex      = STRING_ID_AVR//NO_DESCRIPTOR
 		},
 
 	.CDC2_Functional_Header =

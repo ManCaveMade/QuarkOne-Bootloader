@@ -38,7 +38,6 @@ void EVENT_USB_Device_ControlRequest(void);
 static void USBToUSART_Task(void);
 
 
-
 // Bootloader Stuff: ----------------------------------------------------------
 
 #include "sp_driver.h"
