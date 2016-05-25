@@ -39,4 +39,4 @@ You may find that the USB device on Windows is unrecognised. On Windows, downloa
 
 ## License
 
-MIT License. Copyright (c) Mitchell A. Cox (mitch[at]enox[.]co[.]za)
+MIT License. Copyright (c) Mitchell A. Cox (mitch[at]enox[dawt][co][dawt]za)
